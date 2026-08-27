@@ -61,11 +61,11 @@ def generate_text_report(student_name, syllabus, prompt_text, data):
 st.set_page_config(page_title="SPM & IGCSE Essay Marker", layout="wide")
 st.title("📝 Automated Writing Marker")
 
-# Sidebar Controls (Renamed to "The Question")
+# Sidebar Controls
 syllabus = st.sidebar.selectbox("Select Syllabus", ["SPM 1119", "IGCSE 0500"])
 task_prompt = st.sidebar.text_area("The Question (Optional)", help="Paste the essay topic or exam question here.")
 
-# File Upload Interface (Added JPG, JPEG, PNG support)
+# File Upload Interface
 uploaded_file = st.file_uploader(
     "Upload Student Essay (.png, .jpg, .jpeg, .pdf, .docx, .txt)", 
     type=["png", "jpg", "jpeg", "pdf", "docx", "txt"]
@@ -109,7 +109,7 @@ if uploaded_file and st.button("Mark Essay"):
                 contents_payload.append(f"STUDENT ESSAY TEXT:\n{content}")
 
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.6-flash",
                 contents=contents_payload,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
