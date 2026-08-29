@@ -159,6 +159,10 @@ if uploaded_files and st.button("Mark & Correct Essay"):
     Evaluate the provided student essay strictly according to official assessment rubrics and criteria for {syllabus}.
     The essay may span across MULTIPLE uploaded images/pages or scanned PDFs. Read all pages in order as ONE single continuous essay.
 
+    CRITICAL INSTRUCTION FOR READING HANDWRITING/IMAGES:
+    - IGNORE any crossed-out, struck-through, or erased words in the student's text. 
+    - Treat crossed-out words as if they do not exist and were never written by the student.
+
     Perform a thorough paragraph-by-paragraph breakdown pointing out errors (grammar, vocabulary, tone, punctuation, coherence) and providing exact corrected rewrites for each paragraph.
     
     Return JSON ONLY matching this structure:
@@ -168,7 +172,7 @@ if uploaded_files and st.button("Mark & Correct Essay"):
       "paragraph_analysis": [
         {{
           "paragraph_number": 1,
-          "original_text": "Exact text from paragraph 1",
+          "original_text": "Exact text from paragraph 1 (excluding crossed-out words)",
           "whats_wrong": "Bullet points or brief explanation of what is wrong with this paragraph",
           "corrected_text": "Polished and corrected version of paragraph 1"
         }}
