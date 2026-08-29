@@ -7,32 +7,55 @@ from google.genai import types
 import pdfplumber
 import docx
 from PIL import Image
+import pypdfium2 as pdfium
 
 # Initialize Gemini Client using Streamlit Secret
 client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 def process_file(uploaded_file):
-    """Extract text or convert image into Gemini bytes part."""
+    """Extract text or convert images/scanned PDFs into Gemini payload parts."""
     filename = uploaded_file.name.lower()
+    payload_parts = []
     
     if filename.endswith(('.png', '.jpg', '.jpeg')):
         img = Image.open(uploaded_file)
         img_byte_arr = io.BytesIO()
         img.save(img_byte_arr, format=img.format if img.format else 'PNG')
-        return "image", types.Part.from_bytes(
+        payload_parts.append(("image", types.Part.from_bytes(
             data=img_byte_arr.getvalue(),
             mime_type=uploaded_file.type
-        )
+        )))
+        
     elif filename.endswith('.pdf'):
+        # Attempt text extraction first
+        text = ""
         with pdfplumber.open(uploaded_file) as pdf:
             text = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
-            return "text", text
+            
+        # If PDF has extractable text, use it
+        if text.strip():
+            payload_parts.append(("text", text))
+        else:
+            # Fallback for Scanned/Handwritten PDFs: Convert PDF pages to images
+            uploaded_file.seek(0)
+            pdf_render = pdfium.PdfDocument(uploaded_file.read())
+            for page in pdf_render:
+                image = page.render(scale=2).to_pil()
+                img_byte_arr = io.BytesIO()
+                image.save(img_byte_arr, format='PNG')
+                payload_parts.append(("image", types.Part.from_bytes(
+                    data=img_byte_arr.getvalue(),
+                    mime_type="image/png"
+                )))
+                
     elif filename.endswith('.docx'):
         doc = docx.Document(uploaded_file)
         text = "\n".join([p.text for p in doc.paragraphs])
-        return "text", text
+        payload_parts.append(("text", text))
     else:
-        return "text", str(uploaded_file.read(), "utf-8")
+        payload_parts.append(("text", str(uploaded_file.read(), "utf-8")))
+        
+    return payload_parts
 
 def generate_text_report(student_name, syllabus, prompt_text, data):
     report = f"WRITING EVALUATION & PARAGRAPH CORRECTION REPORT\n"
@@ -67,7 +90,6 @@ def generate_text_report(student_name, syllabus, prompt_text, data):
     return report
 
 def generate_with_retry(contents_payload, system_instruction, max_retries=3):
-    """Attempt API call up to max_retries times to handle traffic spikes."""
     models_to_try = ["gemini-3.6-flash", "gemini-2.5-flash"]
     
     for model_name in models_to_try:
@@ -108,11 +130,9 @@ syllabus_list = [
     "IGCSE O-Level 1123"
 ]
 
-# Sidebar Controls
 syllabus = st.sidebar.selectbox("Select Syllabus / Marking Scheme", syllabus_list)
 task_prompt = st.sidebar.text_area("The Question (Optional)", help="Paste the essay topic or exam question here.")
 
-# Multi-File Upload Interface
 uploaded_files = st.file_uploader(
     "Upload Student Essay Pages (.png, .jpg, .jpeg, .pdf, .docx, .txt)", 
     type=["png", "jpg", "jpeg", "pdf", "docx", "txt"],
@@ -124,27 +144,20 @@ if uploaded_files and st.button("Mark & Correct Essay"):
     
     if task_prompt:
         contents_payload.append(f"THE QUESTION / ASSIGNMENT PROMPT:\n{task_prompt}\n\n")
-    
-    image_files = [f for f in uploaded_files if f.name.lower().endswith(('.png', '.jpg', '.jpeg'))]
-    if image_files:
-        st.subheader("📷 Uploaded Essay Pages")
-        cols = st.columns(min(len(image_files), 4))
-        for idx, img_file in enumerate(image_files):
-            with cols[idx % 4]:
-                st.image(img_file, caption=f"Page {idx + 1}: {img_file.name}", width=250)
 
     for idx, file in enumerate(uploaded_files):
-        file_type, content = process_file(file)
-        if file_type == "image":
-            contents_payload.append(f"STUDENT ESSAY IMAGE PAGE {idx + 1}:")
-            contents_payload.append(content)
-        else:
-            contents_payload.append(f"STUDENT ESSAY TEXT PAGE {idx + 1}:\n{content}")
+        extracted_parts = process_file(file)
+        for part_type, content in extracted_parts:
+            if part_type == "image":
+                contents_payload.append(f"STUDENT ESSAY IMAGE PAGE {idx + 1}:")
+                contents_payload.append(content)
+            else:
+                contents_payload.append(f"STUDENT ESSAY TEXT PAGE {idx + 1}:\n{content}")
 
     system_instruction = f"""
     You are an official examiner for {syllabus}. 
     Evaluate the provided student essay strictly according to official assessment rubrics and criteria for {syllabus}.
-    The essay may span across MULTIPLE uploaded images/pages. Read all pages in order as ONE single continuous essay.
+    The essay may span across MULTIPLE uploaded images/pages or scanned PDFs. Read all pages in order as ONE single continuous essay.
 
     Perform a thorough paragraph-by-paragraph breakdown pointing out errors (grammar, vocabulary, tone, punctuation, coherence) and providing exact corrected rewrites for each paragraph.
     
@@ -173,11 +186,9 @@ if uploaded_files and st.button("Mark & Correct Essay"):
             response = generate_with_retry(contents_payload, system_instruction)
             data = json.loads(response.text)
             
-            # Display Overall Score
             st.markdown("---")
             st.header(f"Total Score: {data['overall_score']} / {data['max_score']}")
             
-            # Display Paragraph Breakdown
             st.subheader("✍️ Paragraph-by-Paragraph Corrections")
             for item in data.get('paragraph_analysis', []):
                 with st.expander(f"📌 Paragraph {item['paragraph_number']} Analysis & Correction", expanded=True):
@@ -185,7 +196,6 @@ if uploaded_files and st.button("Mark & Correct Essay"):
                     st.markdown(f"**❌ What's Wrong:**\n{item['whats_wrong']}")
                     st.markdown(f"**✅ Corrected Version:**\n{item['corrected_text']}")
 
-            # Display Criteria
             st.subheader("📊 Criteria Breakdown")
             for item in data.get('breakdown', []):
                 st.markdown(f"**{item['criterion']} ({item['score']}/{item['max']})**")
@@ -199,7 +209,6 @@ if uploaded_files and st.button("Mark & Correct Essay"):
             for i in data.get('improvements', []):
                 st.write(f"- {i}")
                 
-            # Downloadable Report
             report_name = uploaded_files[0].name.split('.')[0]
             report_str = generate_text_report(report_name, syllabus, task_prompt, data)
             st.download_button(
