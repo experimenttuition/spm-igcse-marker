@@ -89,8 +89,8 @@ def generate_text_report(student_name, syllabus, prompt_text, data):
     return report
 
 def generate_with_retry(contents_payload, system_instruction, max_retries=3):
-    # Using gemini-2.5-pro for high-precision, deep-reasoning evaluation quality
-    model_name = "gemini-2.5-pro"
+    # Using gemini-3.1-pro-preview for maximum evaluation precision
+    model_name = "gemini-3.1-pro-preview"
     
     for attempt in range(max_retries):
         try:
