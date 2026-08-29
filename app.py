@@ -1,66 +1,44 @@
+import json
+import io
 import streamlit as st
 from google import genai
 from google.genai import types
 import pdfplumber
 import docx
-import json
 from PIL import Image
-import io
 
 # Initialize Gemini Client using Streamlit Secret
 client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
-def process_file_input(uploaded_files):
-    """
-    Processes single or multiple uploaded files.
-    Returns payload list for Gemini and display metadata.
-    """
-    payload_parts = []
-    display_images = []
-    text_content = ""
-
-    # Sort files by name so Page 1, Page 2 process in natural order
-    sorted_files = sorted(uploaded_files, key=lambda x: x.name)
-
-    for file in sorted_files:
-        filename = file.name.lower()
-
-        if filename.endswith(('.png', '.jpg', '.jpeg')):
-            img = Image.open(file)
-            display_images.append((file.name, img))
-            
-            img_byte_arr = io.BytesIO()
-            img.save(img_byte_arr, format=img.format if img.format else 'PNG')
-            
-            payload_parts.append(
-                types.Part.from_bytes(
-                    data=img_byte_arr.getvalue(),
-                    mime_type=file.type
-                )
-            )
-        elif filename.endswith('.pdf'):
-            with pdfplumber.open(file) as pdf:
-                extracted = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
-                text_content += f"\n--- File: {file.name} ---\n" + extracted
-        elif filename.endswith('.docx'):
-            doc = docx.Document(file)
-            extracted = "\n".join([p.text for p in doc.paragraphs])
-            text_content += f"\n--- File: {file.name} ---\n" + extracted
-        else:
-            extracted = str(file.read(), "utf-8")
-            text_content += f"\n--- File: {file.name} ---\n" + extracted
-
-    if text_content:
-        payload_parts.append(f"STUDENT ESSAY TEXT:\n{text_content}")
-
-    return payload_parts, display_images
+def process_file(uploaded_file):
+    """Extract text or convert image into Gemini bytes part."""
+    filename = uploaded_file.name.lower()
+    
+    if filename.endswith(('.png', '.jpg', '.jpeg')):
+        img = Image.open(uploaded_file)
+        img_byte_arr = io.BytesIO()
+        img.save(img_byte_arr, format=img.format if img.format else 'PNG')
+        return "image", types.Part.from_bytes(
+            data=img_byte_arr.getvalue(),
+            mime_type=uploaded_file.type
+        )
+    elif filename.endswith('.pdf'):
+        with pdfplumber.open(uploaded_file) as pdf:
+            text = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
+            return "text", text
+    elif filename.endswith('.docx'):
+        doc = docx.Document(uploaded_file)
+        text = "\n".join([p.text for p in doc.paragraphs])
+        return "text", text
+    else:
+        return "text", str(uploaded_file.read(), "utf-8")
 
 def generate_text_report(student_name, syllabus, prompt_text, data):
     report = f"WRITING EVALUATION & PARAGRAPH CORRECTION REPORT\n"
     report += f"="*50 + "\n"
-    report += f"Student/Submission : {student_name}\n"
-    report += f"Syllabus           : {syllabus}\n"
-    report += f"Total Score        : {data.get('overall_score', 0)} / {data.get('max_score', 0)}\n"
+    report += f"Student/File : {student_name}\n"
+    report += f"Syllabus     : {syllabus}\n"
+    report += f"Total Score  : {data.get('overall_score', 0)} / {data.get('max_score', 0)}\n"
     report += f"="*50 + "\n\n"
     
     report += "PARAGRAPH-BY-PARAGRAPH ANALYSIS & CORRECTIONS:\n"
@@ -88,38 +66,49 @@ def generate_text_report(student_name, syllabus, prompt_text, data):
     return report
 
 # Interface Setup
-st.set_page_config(page_title="SPM & IGCSE Multi-Page Essay Marker", layout="wide")
+st.set_page_config(page_title="SPM & IGCSE Essay Marker", layout="wide")
 st.title("📝 Automated Writing Marker & Paragraph Corrector")
 
 # Sidebar Controls
 syllabus = st.sidebar.selectbox("Select Syllabus", ["SPM 1119", "IGCSE 0500"])
 task_prompt = st.sidebar.text_area("The Question (Optional)", help="Paste the essay topic or exam question here.")
 
-# Multi-File Upload Enabled (accept_multiple_files=True)
+# Multi-File Upload Interface
 uploaded_files = st.file_uploader(
     "Upload Student Essay Pages (.png, .jpg, .jpeg, .pdf, .docx, .txt)", 
     type=["png", "jpg", "jpeg", "pdf", "docx", "txt"],
     accept_multiple_files=True
 )
 
-if uploaded_files and st.button("Mark Essay"):
-    payload_parts, display_images = process_file_input(uploaded_files)
+if uploaded_files and st.button("Mark & Correct Essay"):
+    contents_payload = []
     
-    # Display image previews side-by-side or in columns
-    if display_images:
+    if task_prompt:
+        contents_payload.append(f"THE QUESTION / ASSIGNMENT PROMPT:\n{task_prompt}\n\n")
+    
+    # Display image previews safely
+    image_files = [f for f in uploaded_files if f.name.lower().endswith(('.png', '.jpg', '.jpeg'))]
+    if image_files:
         st.subheader("📷 Uploaded Essay Pages")
-        cols = st.columns(min(len(display_images), 3))
-        for idx, (img_name, img_obj) in enumerate(display_images):
-            with cols[idx % 3]:
-                st.image(img_obj, caption=f"Page {idx+1}: {img_name}", use_column_width=True)
-    
+        cols = st.columns(min(len(image_files), 4))
+        for idx, img_file in enumerate(image_files):
+            with cols[idx % 4]:
+                st.image(img_file, caption=f"Page {idx + 1}: {img_file.name}", width=250)
+
+    for idx, file in enumerate(uploaded_files):
+        file_type, content = process_file(file)
+        if file_type == "image":
+            contents_payload.append(f"STUDENT ESSAY IMAGE PAGE {idx + 1}:")
+            contents_payload.append(content)
+        else:
+            contents_payload.append(f"STUDENT ESSAY TEXT PAGE {idx + 1}:\n{content}")
+
     system_instruction = f"""
     You are an official examiner for {syllabus}. 
-    Evaluate the provided student essay against official rubric standards. 
-    The submission may contain MULTIPLE IMAGES representing continuous pages of the same essay. 
-    Read all pages sequentially from top to bottom before marking.
+    Evaluate the provided student essay against official rubric standards.
+    The essay may span across MULTIPLE uploaded images/pages. Read all pages in order as ONE single continuous essay.
 
-    Perform a thorough paragraph-by-paragraph breakdown pointing out errors (grammar, vocabulary, tone, punctuation, coherence) and providing exact corrected rewrites for each paragraph across all uploaded pages.
+    Perform a thorough paragraph-by-paragraph breakdown pointing out errors (grammar, vocabulary, tone, punctuation, coherence) and providing exact corrected rewrites for each paragraph.
     
     Return JSON ONLY matching this structure:
     {{
@@ -141,15 +130,8 @@ if uploaded_files and st.button("Mark Essay"):
     }}
     """
     
-    with st.spinner("Processing multi-page submission and evaluating essay..."):
+    with st.spinner("Analyzing all uploaded pages, fixing errors, and calculating marks..."):
         try:
-            contents_payload = []
-            if task_prompt:
-                contents_payload.append(f"THE QUESTION / ASSIGNMENT PROMPT:\n{task_prompt}\n\n")
-            
-            contents_payload.append("STUDENT ESSAY PAGES (READ SEQUENTIALLY):")
-            contents_payload.extend(payload_parts)
-
             response = client.models.generate_content(
                 model="gemini-3.6-flash",
                 contents=contents_payload,
@@ -188,12 +170,12 @@ if uploaded_files and st.button("Mark Essay"):
                 st.write(f"- {i}")
                 
             # Downloadable Report Button
-            submission_name = uploaded_files[0].name.split('.')[0]
-            report_str = generate_text_report(submission_name, syllabus, task_prompt, data)
+            report_name = uploaded_files[0].name.split('.')[0]
+            report_str = generate_text_report(report_name, syllabus, task_prompt, data)
             st.download_button(
                 label="📥 Download Full Marking & Correction Sheet (.txt)",
                 data=report_str,
-                file_name=f"Corrected_{submission_name}.txt",
+                file_name=f"Marked_{report_name}.txt",
                 mime="text/plain"
             )
 
