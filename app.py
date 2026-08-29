@@ -92,7 +92,8 @@ def generate_text_report(student_name, syllabus, prompt_text, data):
     return report
 
 def generate_with_retry(contents_payload, system_instruction, max_retries=3):
-    models_to_try = ["gemini-3.6-flash", "gemini-2.5-flash"]
+    # Updated to active, supported Gemini API model endpoints
+    models_to_try = ["gemini-2.5-flash", "gemini-1.5-flash"]
     
     for model_name in models_to_try:
         for attempt in range(max_retries):
@@ -107,7 +108,7 @@ def generate_with_retry(contents_payload, system_instruction, max_retries=3):
                 )
                 return response
             except Exception as e:
-                if "503" in str(e) and attempt < max_retries - 1:
+                if ("503" in str(e) or "429" in str(e)) and attempt < max_retries - 1:
                     time.sleep(2)
                     continue
                 elif attempt == max_retries - 1 and model_name == models_to_try[-1]:
