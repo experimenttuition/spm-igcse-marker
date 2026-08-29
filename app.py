@@ -65,13 +65,15 @@ def generate_text_report(student_name, syllabus, prompt_text, data):
     report += f"Total Score  : {data.get('overall_score', 0)} / {data.get('max_score', 0)}\n"
     report += f"="*50 + "\n\n"
     
-    report += "PARAGRAPH-BY-PARAGRAPH ANALYSIS & CORRECTIONS:\n"
+    report += "PARAGRAPH-BY-PARAGRAPH ANALYSIS & DETAILED WORD-LEVEL CORRECTIONS:\n"
     report += "-"*50 + "\n"
     for item in data.get('paragraph_analysis', []):
         report += f"Paragraph {item.get('paragraph_number')}:\n"
-        report += f"Original: {item.get('original_text')}\n"
-        report += f"What's Wrong: {item.get('whats_wrong')}\n"
-        report += f"Correction: {item.get('corrected_text')}\n\n"
+        report += f"Original: {item.get('original_text')}\n\n"
+        report += "Word-by-Word Explanations & Error Analysis:\n"
+        report += f"{item.get('whats_wrong')}\n\n"
+        report += f"Corrected Paragraph: {item.get('corrected_text')}\n\n"
+        report += "-"*30 + "\n\n"
 
     report += "CRITERIA BREAKDOWN:\n"
     report += "-"*50 + "\n"
@@ -113,7 +115,7 @@ def generate_with_retry(contents_payload, system_instruction, max_retries=3):
 
 # Interface Setup
 st.set_page_config(page_title="Multi-Syllabus Essay Marker", layout="wide")
-st.title("📝 Automated Writing Marker & Paragraph Corrector")
+st.title("📝 Automated Writing Marker & Detailed Paragraph Corrector")
 
 # Expanded Syllabus List
 syllabus_list = [
@@ -159,12 +161,14 @@ if uploaded_files and st.button("Mark & Correct Essay"):
     Evaluate the provided student essay strictly according to official assessment rubrics and criteria for {syllabus}.
     The essay may span across MULTIPLE uploaded images/pages or scanned PDFs. Read all pages in order as ONE single continuous essay.
 
-    CRITICAL INSTRUCTION FOR READING HANDWRITING/IMAGES:
-    - IGNORE any crossed-out, struck-through, or erased words in the student's text. 
-    - Treat crossed-out words as if they do not exist and were never written by the student.
+    CRITICAL INSTRUCTIONS FOR TRANSCRIPTION AND EXPLANATION:
+    1. IGNORE any crossed-out, struck-through, or erased words in the student's text. Treat them as if they were never written.
+    2. Provide a granular, highly clear breakdown for EVERY SINGLE WORD or PHRASE you change, delete, or add.
+    3. For the `whats_wrong` field, structure the explanation using clear bullet points. For EVERY changed word/phrase, specify:
+       - **Original Wording:** [exact word/phrase]
+       - **Why Unacceptable:** [explain clearly why it is grammatically incorrect, awkward, informal, misplaced, or unidiomatic for {syllabus}]
+       - **Replacement/Correction:** [exact word/phrase used in the corrected version]
 
-    Perform a thorough paragraph-by-paragraph breakdown pointing out errors (grammar, vocabulary, tone, punctuation, coherence) and providing exact corrected rewrites for each paragraph.
-    
     Return JSON ONLY matching this structure:
     {{
       "overall_score": 0,
@@ -173,7 +177,7 @@ if uploaded_files and st.button("Mark & Correct Essay"):
         {{
           "paragraph_number": 1,
           "original_text": "Exact text from paragraph 1 (excluding crossed-out words)",
-          "whats_wrong": "Bullet points or brief explanation of what is wrong with this paragraph",
+          "whats_wrong": "Bulleted list providing clear explanations for every changed word and why the original phrasing is unacceptable.",
           "corrected_text": "Polished and corrected version of paragraph 1"
         }}
       ],
@@ -193,12 +197,12 @@ if uploaded_files and st.button("Mark & Correct Essay"):
             st.markdown("---")
             st.header(f"Total Score: {data['overall_score']} / {data['max_score']}")
             
-            st.subheader("✍️ Paragraph-by-Paragraph Corrections")
+            st.subheader("✍️ Paragraph-by-Paragraph Corrections & Word Explanations")
             for item in data.get('paragraph_analysis', []):
-                with st.expander(f"📌 Paragraph {item['paragraph_number']} Analysis & Correction", expanded=True):
+                with st.expander(f"📌 Paragraph {item['paragraph_number']} Analysis & Corrections", expanded=True):
                     st.markdown(f"**Original Text:**\n> {item['original_text']}")
-                    st.markdown(f"**❌ What's Wrong:**\n{item['whats_wrong']}")
-                    st.markdown(f"**✅ Corrected Version:**\n{item['corrected_text']}")
+                    st.markdown(f"**🔍 Detailed Word-by-Word Explanations & Error Analysis:**\n{item['whats_wrong']}")
+                    st.markdown(f"**✅ Corrected Paragraph:**\n{item['corrected_text']}")
 
             st.subheader("📊 Criteria Breakdown")
             for item in data.get('breakdown', []):
