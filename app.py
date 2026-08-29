@@ -1,6 +1,7 @@
 import json
 import io
 import time
+import re
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -19,11 +20,13 @@ def process_file(uploaded_file):
     
     if filename.endswith(('.png', '.jpg', '.jpeg')):
         img = Image.open(uploaded_file)
+        # Resize/compress image to save tokens without losing readability
+        img.thumbnail((1600, 1600))
         img_byte_arr = io.BytesIO()
-        img.save(img_byte_arr, format=img.format if img.format else 'PNG')
+        img.save(img_byte_arr, format='JPEG', quality=85)
         payload_parts.append(("image", types.Part.from_bytes(
             data=img_byte_arr.getvalue(),
-            mime_type=uploaded_file.type
+            mime_type="image/jpeg"
         )))
         
     elif filename.endswith('.pdf'):
@@ -37,12 +40,13 @@ def process_file(uploaded_file):
             uploaded_file.seek(0)
             pdf_render = pdfium.PdfDocument(uploaded_file.read())
             for page in pdf_render:
-                image = page.render(scale=2).to_pil()
+                image = page.render(scale=1.5).to_pil()
+                image.thumbnail((1600, 1600))
                 img_byte_arr = io.BytesIO()
-                image.save(img_byte_arr, format='PNG')
+                image.save(img_byte_arr, format='JPEG', quality=85)
                 payload_parts.append(("image", types.Part.from_bytes(
                     data=img_byte_arr.getvalue(),
-                    mime_type="image/png"
+                    mime_type="image/jpeg"
                 )))
                 
     elif filename.endswith('.docx'):
@@ -88,11 +92,11 @@ def generate_text_report(student_name, syllabus, prompt_text, data):
         
     return report
 
-def generate_with_retry(contents_payload, system_instruction, max_retries=3):
-    # Using gemini-3.1-pro-preview for maximum evaluation precision
-    model_name = "gemini-3.1-pro-preview"
+def generate_with_retry(contents_payload, system_instruction):
+    """Exclusively uses Gemini 2.5 Pro for deep evaluation, with Gemini 2.5 Flash as backup."""
+    models_to_try = ["gemini-2.5-pro", "gemini-2.5-flash"]
     
-    for attempt in range(max_retries):
+    for model_name in models_to_try:
         try:
             response = client.models.generate_content(
                 model=model_name,
@@ -104,14 +108,36 @@ def generate_with_retry(contents_payload, system_instruction, max_retries=3):
             )
             return response
         except Exception as e:
-            if attempt < max_retries - 1:
-                time.sleep(3)
-                continue
+            err_msg = str(e)
+            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                match = re.search(r'retry in (\d+(\.\d+)?)s', err_msg)
+                wait_time = float(match.group(1)) if match else 10.0
+                
+                if model_name == "gemini-2.5-pro":
+                    st.warning("Gemini 2.5 Pro quota reached. Automatically switching to Gemini 2.5 Flash engine...")
+                    time.sleep(2)
+                    continue
+                else:
+                    st.warning(f"Rate limit reached on {model_name}. Waiting {int(wait_time)} seconds before retrying...")
+                    time.sleep(wait_time + 2)
+                    try:
+                        return client.models.generate_content(
+                            model=model_name,
+                            contents=contents_payload,
+                            config=types.GenerateContentConfig(
+                                system_instruction=system_instruction,
+                                response_mime_type="application/json"
+                            )
+                        )
+                    except Exception:
+                        continue
             else:
-                raise e
+                continue
+                
+    raise RuntimeError("Gemini 2.5 servers are currently busy or rate-limited. Please wait 1 minute and try again.")
 
 # Interface Setup
-st.set_page_config(page_title="High-Precision Essay Marker", layout="wide")
+st.set_page_config(page_title="High-Precision Essay Marker (2.5 Focused)", layout="wide")
 st.title("📝 Automated Writing Marker & Deep Paragraph Corrector")
 
 syllabus_list = [
@@ -185,7 +211,7 @@ if uploaded_files and st.button("Mark & Correct Essay"):
     }}
     """
     
-    with st.spinner(f"Performing deep evaluation using {syllabus} rubric standards..."):
+    with st.spinner(f"Performing deep evaluation using Gemini 2.5 and {syllabus} rubric standards..."):
         try:
             response = generate_with_retry(contents_payload, system_instruction)
             data = json.loads(response.text)
