@@ -1,5 +1,6 @@
 import json
 import io
+import time
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -65,6 +66,29 @@ def generate_text_report(student_name, syllabus, prompt_text, data):
         
     return report
 
+def generate_with_retry(contents_payload, system_instruction, max_retries=3):
+    """Attempt API call up to max_retries times to handle 503 traffic spikes."""
+    models_to_try = ["gemini-3.6-flash", "gemini-2.5-flash"]
+    
+    for model_name in models_to_try:
+        for attempt in range(max_retries):
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=contents_payload,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json"
+                    )
+                )
+                return response
+            except Exception as e:
+                if "503" in str(e) and attempt < max_retries - 1:
+                    time.sleep(2)  # Wait 2 seconds before retrying
+                    continue
+                elif attempt == max_retries - 1 and model_name == models_to_try[-1]:
+                    raise e
+
 # Interface Setup
 st.set_page_config(page_title="SPM & IGCSE Essay Marker", layout="wide")
 st.title("📝 Automated Writing Marker & Paragraph Corrector")
@@ -86,7 +110,6 @@ if uploaded_files and st.button("Mark & Correct Essay"):
     if task_prompt:
         contents_payload.append(f"THE QUESTION / ASSIGNMENT PROMPT:\n{task_prompt}\n\n")
     
-    # Display image previews safely
     image_files = [f for f in uploaded_files if f.name.lower().endswith(('.png', '.jpg', '.jpeg'))]
     if image_files:
         st.subheader("📷 Uploaded Essay Pages")
@@ -130,24 +153,16 @@ if uploaded_files and st.button("Mark & Correct Essay"):
     }}
     """
     
-    with st.spinner("Analyzing all uploaded pages, fixing errors, and calculating marks..."):
+    with st.spinner("Analyzing pages, fixing errors, and calculating marks..."):
         try:
-            response = client.models.generate_content(
-                model="gemini-3.6-flash",
-                contents=contents_payload,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    response_mime_type="application/json"
-                )
-            )
-            
+            response = generate_with_retry(contents_payload, system_instruction)
             data = json.loads(response.text)
             
             # Display Overall Score
             st.markdown("---")
             st.header(f"Total Score: {data['overall_score']} / {data['max_score']}")
             
-            # Display Paragraph-by-Paragraph Corrections
+            # Display Paragraph Breakdown
             st.subheader("✍️ Paragraph-by-Paragraph Corrections")
             for item in data.get('paragraph_analysis', []):
                 with st.expander(f"📌 Paragraph {item['paragraph_number']} Analysis & Correction", expanded=True):
@@ -155,7 +170,7 @@ if uploaded_files and st.button("Mark & Correct Essay"):
                     st.markdown(f"**❌ What's Wrong:**\n{item['whats_wrong']}")
                     st.markdown(f"**✅ Corrected Version:**\n{item['corrected_text']}")
 
-            # Display Rubric Breakdown
+            # Display Criteria
             st.subheader("📊 Criteria Breakdown")
             for item in data.get('breakdown', []):
                 st.markdown(f"**{item['criterion']} ({item['score']}/{item['max']})**")
@@ -169,7 +184,7 @@ if uploaded_files and st.button("Mark & Correct Essay"):
             for i in data.get('improvements', []):
                 st.write(f"- {i}")
                 
-            # Downloadable Report Button
+            # Downloadable Report
             report_name = uploaded_files[0].name.split('.')[0]
             report_str = generate_text_report(report_name, syllabus, task_prompt, data)
             st.download_button(
@@ -180,4 +195,4 @@ if uploaded_files and st.button("Mark & Correct Essay"):
             )
 
         except Exception as e:
-            st.error(f"Error evaluating essay: {e}")
+            st.error(f"Server is busy right now. Please click 'Mark & Correct Essay' again in a few seconds. Details: {e}")
