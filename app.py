@@ -67,7 +67,7 @@ def generate_text_report(student_name, syllabus, prompt_text, data):
     return report
 
 def generate_with_retry(contents_payload, system_instruction, max_retries=3):
-    """Attempt API call up to max_retries times to handle 503 traffic spikes."""
+    """Attempt API call up to max_retries times to handle traffic spikes."""
     models_to_try = ["gemini-3.6-flash", "gemini-2.5-flash"]
     
     for model_name in models_to_try:
@@ -84,17 +84,32 @@ def generate_with_retry(contents_payload, system_instruction, max_retries=3):
                 return response
             except Exception as e:
                 if "503" in str(e) and attempt < max_retries - 1:
-                    time.sleep(2)  # Wait 2 seconds before retrying
+                    time.sleep(2)
                     continue
                 elif attempt == max_retries - 1 and model_name == models_to_try[-1]:
                     raise e
 
 # Interface Setup
-st.set_page_config(page_title="SPM & IGCSE Essay Marker", layout="wide")
+st.set_page_config(page_title="Multi-Syllabus Essay Marker", layout="wide")
 st.title("📝 Automated Writing Marker & Paragraph Corrector")
 
+# Expanded Syllabus List
+syllabus_list = [
+    "MPT4",
+    "UASA Form 3",
+    "SPM 1119",
+    "IGCSE 3138 (Year 7)",
+    "IGCSE 3139 (Year 8)",
+    "IGCSE 3140 (Year 9)",
+    "IGCSE 0816/01",
+    "IGCSE 0816/02",
+    "IGCSE 0500",
+    "IGCSE 0510",
+    "IGCSE O-Level 1123"
+]
+
 # Sidebar Controls
-syllabus = st.sidebar.selectbox("Select Syllabus", ["SPM 1119", "IGCSE 0500"])
+syllabus = st.sidebar.selectbox("Select Syllabus / Marking Scheme", syllabus_list)
 task_prompt = st.sidebar.text_area("The Question (Optional)", help="Paste the essay topic or exam question here.")
 
 # Multi-File Upload Interface
@@ -128,7 +143,7 @@ if uploaded_files and st.button("Mark & Correct Essay"):
 
     system_instruction = f"""
     You are an official examiner for {syllabus}. 
-    Evaluate the provided student essay against official rubric standards.
+    Evaluate the provided student essay strictly according to official assessment rubrics and criteria for {syllabus}.
     The essay may span across MULTIPLE uploaded images/pages. Read all pages in order as ONE single continuous essay.
 
     Perform a thorough paragraph-by-paragraph breakdown pointing out errors (grammar, vocabulary, tone, punctuation, coherence) and providing exact corrected rewrites for each paragraph.
@@ -153,7 +168,7 @@ if uploaded_files and st.button("Mark & Correct Essay"):
     }}
     """
     
-    with st.spinner("Analyzing pages, fixing errors, and calculating marks..."):
+    with st.spinner(f"Analyzing essay using {syllabus} rubric standards..."):
         try:
             response = generate_with_retry(contents_payload, system_instruction)
             data = json.loads(response.text)
@@ -195,4 +210,4 @@ if uploaded_files and st.button("Mark & Correct Essay"):
             )
 
         except Exception as e:
-            st.error(f"Server is busy right now. Please click 'Mark & Correct Essay' again in a few seconds. Details: {e}")
+            st.error(f"Error evaluating essay: {e}")
