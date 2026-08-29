@@ -27,16 +27,13 @@ def process_file(uploaded_file):
         )))
         
     elif filename.endswith('.pdf'):
-        # Attempt text extraction first
         text = ""
         with pdfplumber.open(uploaded_file) as pdf:
             text = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
             
-        # If PDF has extractable text, use it
         if text.strip():
             payload_parts.append(("text", text))
         else:
-            # Fallback for Scanned/Handwritten PDFs: Convert PDF pages to images
             uploaded_file.seek(0)
             pdf_render = pdfium.PdfDocument(uploaded_file.read())
             for page in pdf_render:
@@ -92,33 +89,31 @@ def generate_text_report(student_name, syllabus, prompt_text, data):
     return report
 
 def generate_with_retry(contents_payload, system_instruction, max_retries=3):
-    # Updated to active, supported Gemini API model endpoints
-    models_to_try = ["gemini-2.5-flash", "gemini-1.5-flash"]
+    # Using gemini-2.5-pro for high-precision, deep-reasoning evaluation quality
+    model_name = "gemini-2.5-pro"
     
-    for model_name in models_to_try:
-        for attempt in range(max_retries):
-            try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=contents_payload,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json"
-                    )
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents_payload,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json"
                 )
-                return response
-            except Exception as e:
-                if ("503" in str(e) or "429" in str(e)) and attempt < max_retries - 1:
-                    time.sleep(2)
-                    continue
-                elif attempt == max_retries - 1 and model_name == models_to_try[-1]:
-                    raise e
+            )
+            return response
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(3)
+                continue
+            else:
+                raise e
 
 # Interface Setup
-st.set_page_config(page_title="Multi-Syllabus Essay Marker", layout="wide")
-st.title("📝 Automated Writing Marker & Detailed Paragraph Corrector")
+st.set_page_config(page_title="High-Precision Essay Marker", layout="wide")
+st.title("📝 Automated Writing Marker & Deep Paragraph Corrector")
 
-# Expanded Syllabus List
 syllabus_list = [
     "MPT4",
     "UASA Form 3",
@@ -158,13 +153,13 @@ if uploaded_files and st.button("Mark & Correct Essay"):
                 contents_payload.append(f"STUDENT ESSAY TEXT PAGE {idx + 1}:\n{content}")
 
     system_instruction = f"""
-    You are an official examiner for {syllabus}. 
-    Evaluate the provided student essay strictly according to official assessment rubrics and criteria for {syllabus}.
+    You are an expert official senior examiner for {syllabus}.
+    Evaluate the provided student essay with extreme precision according to official assessment rubrics and criteria for {syllabus}.
     The essay may span across MULTIPLE uploaded images/pages or scanned PDFs. Read all pages in order as ONE single continuous essay.
 
     CRITICAL INSTRUCTIONS FOR TRANSCRIPTION AND EXPLANATION:
     1. IGNORE any crossed-out, struck-through, or erased words in the student's text. Treat them as if they were never written.
-    2. Provide a granular, highly clear breakdown for EVERY SINGLE WORD or PHRASE you change, delete, or add.
+    2. Provide a rigorous, highly granular breakdown for EVERY SINGLE WORD or PHRASE you change, delete, or add.
     3. For the `whats_wrong` field, structure the explanation using clear bullet points. For EVERY changed word/phrase, specify:
        - **Original Wording:** [exact word/phrase]
        - **Why Unacceptable:** [explain clearly why it is grammatically incorrect, awkward, informal, misplaced, or unidiomatic for {syllabus}]
@@ -190,7 +185,7 @@ if uploaded_files and st.button("Mark & Correct Essay"):
     }}
     """
     
-    with st.spinner(f"Analyzing essay using {syllabus} rubric standards..."):
+    with st.spinner(f"Performing deep evaluation using {syllabus} rubric standards..."):
         try:
             response = generate_with_retry(contents_payload, system_instruction)
             data = json.loads(response.text)
