@@ -20,7 +20,6 @@ def process_file(uploaded_file):
     
     if filename.endswith(('.png', '.jpg', '.jpeg')):
         img = Image.open(uploaded_file)
-        # Resize/compress image to save tokens without losing readability
         img.thumbnail((1600, 1600))
         img_byte_arr = io.BytesIO()
         img.save(img_byte_arr, format='JPEG', quality=85)
@@ -87,57 +86,41 @@ def generate_text_report(student_name, syllabus, prompt_text, data):
         report += f"- {s}\n"
         
     report += "\nAREAS FOR IMPROVEMENT:\n"
-    for i in data.get('improvements', []):
-        report += f"- {i}\n"
+    report += "- {i}\n" for i in data.get('improvements', [])
         
     return report
 
 def generate_with_retry(contents_payload, system_instruction):
-    """Exclusively uses Gemini 2.5 Pro for deep evaluation, with Gemini 2.5 Flash as backup."""
+    """Executes request using 2.5 Pro with seamless fallback to 2.5 Flash and robust error reporting."""
     models_to_try = ["gemini-2.5-pro", "gemini-2.5-flash"]
+    last_error = None
     
     for model_name in models_to_try:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=contents_payload,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    response_mime_type="application/json"
+        for attempt in range(2):
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=contents_payload,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json"
+                    )
                 )
-            )
-            return response
-        except Exception as e:
-            err_msg = str(e)
-            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
-                match = re.search(r'retry in (\d+(\.\d+)?)s', err_msg)
-                wait_time = float(match.group(1)) if match else 10.0
-                
-                if model_name == "gemini-2.5-pro":
-                    st.warning("Gemini 2.5 Pro quota reached. Automatically switching to Gemini 2.5 Flash engine...")
-                    time.sleep(2)
-                    continue
+                if response and response.text:
+                    return response
+            except Exception as e:
+                last_error = str(e)
+                if "429" in last_error or "RESOURCE_EXHAUSTED" in last_error:
+                    st.warning(f"Rate limit hit on {model_name}. Switching/retrying...")
+                    time.sleep(5)
                 else:
-                    st.warning(f"Rate limit reached on {model_name}. Waiting {int(wait_time)} seconds before retrying...")
-                    time.sleep(wait_time + 2)
-                    try:
-                        return client.models.generate_content(
-                            model=model_name,
-                            contents=contents_payload,
-                            config=types.GenerateContentConfig(
-                                system_instruction=system_instruction,
-                                response_mime_type="application/json"
-                            )
-                        )
-                    except Exception:
-                        continue
-            else:
-                continue
-                
-    raise RuntimeError("Gemini 2.5 servers are currently busy or rate-limited. Please wait 1 minute and try again.")
+                    st.warning(f"Engine notice ({model_name}): {last_error[:120]}...")
+                    time.sleep(3)
+                    
+    raise RuntimeError(f"API Error: {last_error if last_error else 'Unable to generate response. Please check your API quota.'}")
 
 # Interface Setup
-st.set_page_config(page_title="High-Precision Essay Marker (2.5 Focused)", layout="wide")
+st.set_page_config(page_title="High-Precision Essay Marker", layout="wide")
 st.title("📝 Automated Writing Marker & Deep Paragraph Corrector")
 
 syllabus_list = [
@@ -185,11 +168,8 @@ if uploaded_files and st.button("Mark & Correct Essay"):
 
     CRITICAL INSTRUCTIONS FOR TRANSCRIPTION AND EXPLANATION:
     1. IGNORE any crossed-out, struck-through, or erased words in the student's text. Treat them as if they were never written.
-    2. Provide a rigorous, highly granular breakdown for EVERY SINGLE WORD or PHRASE you change, delete, or add.
-    3. For the `whats_wrong` field, structure the explanation using clear bullet points. For EVERY changed word/phrase, specify:
-       - **Original Wording:** [exact word/phrase]
-       - **Why Unacceptable:** [explain clearly why it is grammatically incorrect, awkward, informal, misplaced, or unidiomatic for {syllabus}]
-       - **Replacement/Correction:** [exact word/phrase used in the corrected version]
+    2. Provide a rigorous breakdown for EVERY SINGLE WORD or PHRASE you change, delete, or add.
+    3. For the `whats_wrong` field, structure the explanation using clear bullet points. Specify original wording, why unacceptable, and replacement.
 
     Return JSON ONLY matching this structure:
     {{
@@ -211,7 +191,7 @@ if uploaded_files and st.button("Mark & Correct Essay"):
     }}
     """
     
-    with st.spinner(f"Performing deep evaluation using Gemini 2.5 and {syllabus} rubric standards..."):
+    with st.spinner(f"Evaluating essay against {syllabus} standards..."):
         try:
             response = generate_with_retry(contents_payload, system_instruction)
             data = json.loads(response.text)
