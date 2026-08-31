@@ -86,7 +86,8 @@ def generate_text_report(student_name, syllabus, prompt_text, data):
         report += f"- {s}\n"
         
     report += "\nAREAS FOR IMPROVEMENT:\n"
-    report += "- {i}\n" for i in data.get('improvements', [])
+    for i in data.get('improvements', []):
+        report += f"- {i}\n"
         
     return report
 
