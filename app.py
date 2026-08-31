@@ -92,8 +92,8 @@ def generate_text_report(student_name, syllabus, prompt_text, data):
     return report
 
 def generate_with_retry(contents_payload, system_instruction):
-    """Executes request using 2.5 Pro with seamless fallback to 2.5 Flash and robust error reporting."""
-    models_to_try = ["gemini-2.5-pro", "gemini-2.5-flash"]
+    """Executes request using active available models with seamless fallback."""
+    models_to_try = ["gemini-2.0-flash", "gemini-1.5-pro"]
     last_error = None
     
     for model_name in models_to_try:
@@ -112,13 +112,16 @@ def generate_with_retry(contents_payload, system_instruction):
             except Exception as e:
                 last_error = str(e)
                 if "429" in last_error or "RESOURCE_EXHAUSTED" in last_error:
-                    st.warning(f"Rate limit hit on {model_name}. Switching/retrying...")
+                    st.warning(f"Rate limit hit on {model_name}. Retrying...")
                     time.sleep(5)
+                elif "404" in last_error or "NOT_FOUND" in last_error:
+                    st.warning(f"Model {model_name} unavailable. Switching engine...")
+                    break
                 else:
                     st.warning(f"Engine notice ({model_name}): {last_error[:120]}...")
                     time.sleep(3)
                     
-    raise RuntimeError(f"API Error: {last_error if last_error else 'Unable to generate response. Please check your API quota.'}")
+    raise RuntimeError(f"API Error: {last_error if last_error else 'Unable to generate response. Please check API settings.'}")
 
 # Interface Setup
 st.set_page_config(page_title="High-Precision Essay Marker", layout="wide")
